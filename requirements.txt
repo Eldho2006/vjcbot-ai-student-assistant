@@ -1,0 +1,13 @@
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Werkzeug
+chromadb
+langchain
+langchain-community
+langchain-google-genai
+google-search-results
+python-dotenv
+PyPDF2
+Pillow
+google-generativeai

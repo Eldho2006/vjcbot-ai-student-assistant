@@ -1,0 +1,81 @@
+﻿Warning: RAG dependencies not found (No module named 'langchain_community'). AI features will be limited.
+--- TEST 1: LOCAL KNOWLEDGE BASE ---
+Query: What does BLTU stand for?
+Result:
+I found the answer in your documents, but my AI quota is exhausted so I cannot summarize it. Here is the relevant text:
+
+esign of such circuits.
+Appendices B, C, D, and E illustrate how the instruction set concepts introduced in
+Chapters 2 and 3 are implemented in four commercial processors: Nios II, ColdFire, ARM,and Intel IA-32. The Nios II and ARM processors illustrate the RISC design style. ColdFirehas an easy-to-teach CISC design, while the IA-32 CISC architecture represents the mostsuccessful commercial design. The presentation for each processor includes assembly-language examples from Chapters 2 and 3, implemented in the context of that processor. Thedetails given in these appendices are not essential for understanding the material in the mainbody of the book. It is suf∩¼ücient to cover only one of these appendices to gain an appreciationfor commercial processor instruction sets. The choice of a processor to use as an exampleis likely to be in∩¼éuenced by the equipment in an accompanying laboratory. Instructors maywish to use more that one processor to illustrate the different design approaches.
+ChangesintheSixthEdition
+Substantial changes in content and organization have been made in preparing the sixthedition of this book. They include the following:
+ΓÇóThe basic concepts of instruction set architecture are now covered using the RISC-style
+approach. This is followed by a comparative examination of the CISC-style approach.
+ΓÇóThe processor design discussion is focused on a RISC-style implementation, which
+leads naturally to pipelined operation.
+ΓÇóTwo chapters on embedded systems are included: one dealing with the basic structure
+of such systems and the use of microcontrollers, and the other dealing with system-on-a-chip implementations.
+ΓÇóAppendices are used to give examples of four commercial processors. Each appendix
+includes the essential information about the instruction set architecture of the givenprocessor.
+ΓÇóSolved problems have been included in a new section toward the end of chapters andappendices. They provide the student with solutions that can be expected for typicalproblem...
+
+------------------------------
+--- TEST 2: WEB SEARCH ---
+Query: What is the current stock price of Google?
+Searching web (Reason: Quota exceeded and no good context found: 429 You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. 
+* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash-lite
+* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash-lite
+* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.0-flash-lite
+Please retry in 8.769748955s. [links {
+  description: "Learn more about Gemini API quotas"
+  url: "https://ai.google.dev/gemini-api/docs/rate-limits"
+}
+, violations {
+  quota_metric: "generativelanguage.googleapis.com/generate_content_free_tier_requests"
+  quota_id: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+  quota_dimensions {
+    key: "model"
+    value: "gemini-2.0-flash-lite"
+  }
+  quota_dimensions {
+    key: "location"
+    value: "global"
+  }
+}
+violations {
+  quota_metric: "generativelanguage.googleapis.com/generate_content_free_tier_requests"
+  quota_id: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+  quota_dimensions {
+    key: "model"
+    value: "gemini-2.0-flash-lite"
+  }
+  quota_dimensions {
+    key: "location"
+    value: "global"
+  }
+}
+violations {
+  quota_metric: "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count"
+  quota_id: "GenerateContentInputTokensPerModelPerMinute-FreeTier"
+  quota_dimensions {
+    key: "model"
+    value: "gemini-2.0-flash-lite"
+  }
+  quota_dimensions {
+    key: "location"
+    value: "global"
+  }
+}
+, retry_delay {
+  seconds: 8
+}
+])...
+Result:
+[Web Search Result] (AI Summary Unavailable Due to Quota)
+- Alphabet Inc. (GOOG) Stock Price, News, Quote & History: Find the latest Alphabet Inc. (GOOG) stock quote, history, news and other vital information to help you with your stock trading and investing.
+- GOOGL: Alphabet Class A - Stock Price, Quote and News: Alphabet Class A GOOGL:NASDAQ ; Open328.97 ; Day High330.32 ; Day Low321.50 ; Prev Close321.98 ; 52 Week High330.32 ...
+- Alphabet Class A: GOOGL Stock Price Quote & News: As of 2026-01-08, Alphabet Class A(GOOGL) stock has fluctuated between $320.11 and $330.32. The current price stands at $322.34, placing the stock +0.7% above ...
+- GOOG Stock Quote Price and Forecast: Price Momentum ┬╖ GOOG is trading near the top ; Price change ┬╖ The price of GOOG shares has increased $1.52 ; Closed at $315.32. ┬╖ The stock has since dropped $0.13 ...
+- Alphabet Inc. Cl A Stock Quote (U.S.: Nasdaq) - GOOGL: Key Data. Open $328.97; Day Range 322.12 - 330.32; 52 Week Range 140.53 - 330.32; Market Cap $3.89T; Shares Outstanding 5.82B; Public Float 5.8B; Beta 1.27 ...
+
+
