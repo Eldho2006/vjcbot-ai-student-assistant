@@ -1,37 +1,68 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
+import sys
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Blueprint
-from flask_login import LoginManager, login_required, current_user
-from werkzeug.utils import secure_filename
-from config import Config
-from database import db, User, Document
-# from ai_engine import ai_engine
-import PyPDF2
+# 1. Minimal Imports
+from flask import Flask, jsonify
 
+# 2. Create App immediately
 app = Flask(__name__)
-app.config.from_object(Config)
 
+# 3. Global Error Log
+STARTUP_ERRORS = []
+
+# 4. Critical Route: Health Check
 @app.route('/health')
 def health_check():
-    return "OK: Server is running. Python Version: " + os.sys.version
+    status = "OK" if not STARTUP_ERRORS else "PARTIAL_ERROR"
+    return jsonify({
+        "status": status,
+        "python_version": sys.version,
+        "startup_errors": STARTUP_ERRORS
+    })
 
-# Try initializing DB, but don't crash the *entire* app if it fails (so we can see /health)
+# 5. Safe Import Block
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    from werkzeug.utils import secure_filename
+    from flask import render_template, request, redirect, url_for, flash, Blueprint
+    from flask_login import LoginManager, login_required, current_user
+    
+    # Local Imports
+    from config import Config
+    app.config.from_object(Config)
+
+    from database import db, User, Document
+    import PyPDF2
+    
+    # Initialize Extensions
     db.init_app(app)
+    
+    login_manager = LoginManager()
+    login_manager.login_view = 'auth.login'
+    login_manager.init_app(app)
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
+    # Import Blueprints (which might import other things)
+    from auth import auth_bp
+    
+    # Define Main Blueprint Logic Here to avoid circular imports if needed
+    # Or just import it if it's safe
+    # from app import main_bp -- wait, main_bp is defined IN this file usually?
+    # Checking previous file content... main_bp was defined in app.py
+    
 except Exception as e:
-    print(f"DB Init Failed: {e}")
+    import traceback
+    err = f"CRITICAL IMPORT ERROR: {e}\n{traceback.format_exc()}"
+    print(err)
+    STARTUP_ERRORS.append(err)
 
-login_manager = LoginManager()
-login_manager.login_view = 'auth.login'
-login_manager.init_app(app)
-
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
-
-# Blueprint for main routes
+# If we failed to import config/db, these routes below might fail if they rely on them.
+# So we wrap the rest of the file logic or simple checks.
 main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/admin')
@@ -194,8 +225,15 @@ def setup_db():
         return f"CRITICAL ERROR: {e} <br><pre>{traceback.format_exc()}</pre>"
 
 # Register Blueprints
-from auth import auth_bp
-app.register_blueprint(auth_bp)
+# Register Blueprints safely
+try:
+    from auth import auth_bp
+    app.register_blueprint(auth_bp)
+except ImportError:
+    pass # Already logged in global errors
+except Exception as e:
+    print(f"Blueprint Error: {e}")
+
 app.register_blueprint(main_bp)
 
 # Create DB on startup
