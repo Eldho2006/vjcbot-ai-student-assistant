@@ -7,7 +7,7 @@ from flask_login import LoginManager, login_required, current_user
 from werkzeug.utils import secure_filename
 from config import Config
 from database import db, User, Document
-from ai_engine import ai_engine
+# from ai_engine import ai_engine
 import PyPDF2
 
 app = Flask(__name__)
@@ -167,8 +167,9 @@ def chat_api():
     data = request.json
     user_message = data.get('message')
     # Use AI Engine
-    response = ai_engine.get_answer(user_message)
-    return jsonify({'response': response})
+    # response = ai_engine.get_answer(user_message)
+    # return jsonify({'response': response})
+    return jsonify({'response': "AI Temporarily Disabled for Debugging"})
 
 @app.route('/setup')
 def setup_db():
