@@ -79,24 +79,30 @@ try:
         if not helper_db_ready(): return "Database Error", 500
         if current_user.role != 'admin':
             return redirect(url_for('main.chat'))
-        users = User.query.filter_by(role='student').all()
-        documents = Document.query.all()
-        return render_template('admin_dashboard.html', users=users, documents=documents)
+        try:
+            users = User.query.filter_by(role='student').all()
+            documents = Document.query.all()
+            return render_template('admin_dashboard.html', users=users, documents=documents)
+        except Exception as e:
+            return f"<h3>Dashboard Error</h3><p>{e}</p><pre>{traceback.format_exc()}</pre>"
 
     @main_bp.route('/admin/add_user', methods=['POST'])
     @login_required
     def add_user():
         if current_user.role != 'admin': return redirect(url_for('main.chat'))
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if User.query.filter_by(username=username).first():
-            flash('Username exists')
-        else:
-            u = User(username=username, role='student')
-            u.set_password(password)
-            db.session.add(u)
-            db.session.commit()
-            flash('User created')
+        try:
+            username = request.form.get('username')
+            password = request.form.get('password')
+            if User.query.filter_by(username=username).first():
+                flash('Username exists')
+            else:
+                u = User(username=username, role='student')
+                u.set_password(password)
+                db.session.add(u)
+                db.session.commit()
+                flash('User created')
+        except Exception as e:
+            flash(f"Add User Error: {e}")
         return redirect(url_for('main.admin_dashboard'))
         
     @main_bp.route('/admin/upload', methods=['POST'])
@@ -104,20 +110,41 @@ try:
     def upload_file():
         from werkzeug.utils import secure_filename
         import PyPDF2
-        if 'file' in request.files:
-            f = request.files['file']
-            if f and f.filename:
-                # Basic Logic
-                filename = secure_filename(f.filename)
-                text = ""
-                # ... extraction logic ...
-                # Saving
-                doc = Document(filename=filename, file_path="CLOUD", uploaded_by=current_user.id, content=text, processed=True)
-                db.session.add(doc)
-                db.session.commit()
-                # AI
-                if ai_engine: ai_engine.add_document(text, {})
-                flash('Uploaded')
+        try:
+            if 'file' in request.files:
+                f = request.files['file']
+                if f and f.filename:
+                    filename = secure_filename(f.filename)
+                    text = ""
+                    if filename.lower().endswith('.pdf'):
+                        try:
+                            reader = PyPDF2.PdfReader(f.stream)
+                            for page in reader.pages:
+                                text += page.extract_text() or ""
+                        except Exception as pdf_err:
+                            flash(f"PDF Parse Error: {pdf_err}")
+                            return redirect(request.referrer)
+                    else:
+                        text = "Non-PDF content"
+                    
+                    # Saving
+                    doc = Document(filename=filename, file_path="CLOUD", uploaded_by=current_user.id, content=text[:100000], processed=True) # Limit content debug
+                    db.session.add(doc)
+                    db.session.commit()
+                    
+                    # AI
+                    try:
+                        if ai_engine: ai_engine.add_document(text, {})
+                    except Exception as ai_err:
+                        flash(f"AI Index Warning: {ai_err}")
+
+                    flash('Uploaded Successfully')
+            else:
+                 flash("No file part")
+        except Exception as e:
+            flash(f"Upload Error: {e}")
+            print(f"Upload Trace: {traceback.format_exc()}")
+            
         return redirect(request.referrer)
 
     @main_bp.route('/chat')
