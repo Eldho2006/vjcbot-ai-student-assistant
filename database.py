@@ -26,3 +26,5 @@ class Document(db.Model):
     doc_type = db.Column(db.String(50)) # 'pdf', 'image'
     # Metadata for RAG
     processed = db.Column(db.Boolean, default=False)
+    # New: Store extracted text directly in DB
+    content = db.Column(db.Text, nullable=True) 

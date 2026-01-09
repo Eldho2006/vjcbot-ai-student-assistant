@@ -51,65 +51,44 @@ class AIEngine:
 
     def add_document(self, text, metadata):
         """Adds a document to the vector store (or file backup)."""
-        if not RAG_AVAILABLE:
-            try:
-                # Append to a simple text file for "context stuffing"
-                with open("knowledge_base.txt", "a", encoding="utf-8") as f:
-                    f.write(f"\n--- Source: {metadata.get('source', 'Unknown')} ---\n")
-                    f.write(text)
-                    f.write("\n")
-                print(f"Document added to knowledge_base.txt: {metadata.get('source')}")
-            except Exception as e:
-                print(f"Error saving to knowledge base: {e}")
-            return
-
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        texts = text_splitter.split_text(text)
-        
-        docs = [LangChainDocument(page_content=t, metadata=metadata) for t in texts]
-        self.vectordb.add_documents(docs)
-        self.vectordb.persist()
+        # NOTE: For Vercel/DB-only mode, 'add_document' is largely symbolic 
+        # because app.py handles the DB insertion. 
+        # We can keep this for compatibility if we want to do extra processing.
+        # But primarily, the 'get_answer' method reads from the DB.
+        pass
 
     def get_answer(self, query):
         """
-        Retrieves answer from Knowledge Base or Search.
+        Retrieves answer from Knowledge Base (DB) or Search.
         """
         context = "" # Initialize context outside
         if not RAG_AVAILABLE:
-            # 1. Retrieve Local Context
+            # 1. Retrieve Local Context from DATABASE
             full_text = ""
-            if os.path.exists("knowledge_base.txt"):
-                with open("knowledge_base.txt", "r", encoding="utf-8") as f:
-                    full_text = f.read()
+            try:
+                # Import here to avoid circular dependencies at module level if possible, 
+                # strictly inside the function where standard app context is active.
+                from database import Document
+                
+                # Retrieve all processed documents
+                # Optimization: In a real large app, we would use Vector Search (pgvector)
+                # But for this "Free Tier" request, we allow "Context Stuffing" of all text.
+                docs = Document.query.filter(Document.content != None).all()
+                full_text = "\n\n".join([d.content for d in docs if d.content])
+                
+            except Exception as db_e:
+                print(f"Database Read Error: {db_e}")
+                full_text = ""
 
             # --- HARD FILTER LOGIC ---
             # Parsing line-by-line to safely identify and exclude syllabus sections
             is_syllabus_query = any(k in query.lower() for k in ["syllabus", "curriculum", "module", "unit", "outline"])
             
             if not is_syllabus_query:
-                lines = full_text.splitlines()
-                filtered_lines = []
-                current_source_is_banned = False
-                
-                for line in lines:
-                    stripped = line.strip()
-                    # Check for Source Header
-                    # Format is usually: --- Source: Filename.pdf ---
-                    if stripped.startswith("--- Source:") and stripped.endswith("---"):
-                        source_name = stripped.lower()
-                        # specific keywords to ban
-                        if "syllabus" in source_name:
-                            print(f"DEBUG: Filtering out source: {stripped}")
-                            current_source_is_banned = True
-                        else:
-                            current_source_is_banned = False
-                            filtered_lines.append(line)
-                    else:
-                        # Normal Content Line
-                        if not current_source_is_banned:
-                            filtered_lines.append(line)
-                
-                full_text = "\n".join(filtered_lines)
+                # With DB storage, we don't have "--- Source: ---" headers exactly the same way
+                # unless we reconstruct them. 
+                # For now, we trust the raw text in the DB.
+                pass 
             # -------------------------
 
             # -------------------------

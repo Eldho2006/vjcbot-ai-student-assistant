@@ -58,11 +58,7 @@ def add_user():
 @login_required
 def upload_file():
     if current_user.role != 'admin' and current_user.role != 'student':
-         # Students can upload too, mainly for "reading user data"
          pass 
-
-    # Determine if it's admin knowledge base or student temp file
-    is_admin = (current_user.role == 'admin')
 
     if 'file' not in request.files:
         flash('No file part')
@@ -75,37 +71,42 @@ def upload_file():
     
     if file:
         filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Save to DB
-        doc = Document(filename=filename, file_path=filepath, uploaded_by=current_user.id, doc_type='file')
-        db.session.add(doc)
-        db.session.commit()
         
         # Process File for RAG (Simplified Text Extraction)
         # Note: In a real app, this should be a background task
         try:
             text = ""
             if filename.endswith('.pdf'):
-                with open(filepath, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
-                    for page in reader.pages:
-                        extracted = page.extract_text()
-                        if extracted:
-                            text += extracted
+                # Read directly from memory stream
+                reader = PyPDF2.PdfReader(file.stream)
+                for page in reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted
             elif filename.endswith('.txt'):
-                 with open(filepath, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                text = file.stream.read().decode('utf-8')
             elif filename.endswith('.docx'):
-                # Basic docx support can be added with python-docx if needed, 
-                # but for now let's skip or ask user for generic formats.
                 flash('DOCX parsing not yet enabled, please save as PDF or TXT')
-                pass
+                return redirect(request.referrer)
+            
+            # Save to DB (Content ONLY)
+            # We do NOT save the file path anymore
+            doc = Document(
+                filename=filename, 
+                file_path="CLOUD_STORED", # Placeholder
+                uploaded_by=current_user.id, 
+                doc_type='file',
+                content=text, # Save text content
+                processed=True
+            )
+            db.session.add(doc)
+            db.session.commit()
+
             # Construct metadata
             metadata = {"source": filename, "uploaded_by": current_user.role}
+            # Add to AI Engine (Uses DB now)
             ai_engine.add_document(text, metadata)
-            flash('File uploaded and processed successfully')
+            flash('File processed and saved to database successfully')
         except Exception as e:
             flash(f'Error processing file: {e}')
 
