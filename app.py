@@ -54,6 +54,10 @@ def trigger_init():
         INIT_ERROR = str(e)
         raise e
 
+@app.route('/')
+def index():
+    return "<h1>Manual Init Mode</h1><p>Visit <a href='/health'>/health</a> to check status.</p><p>Visit <a href='/start'>/start</a> to ignite the engine.</p>"
+
 @app.route('/health')
 def health():
     return jsonify({
