@@ -11,13 +11,18 @@ import google.generativeai as genai
 class AIEngine:
     def __init__(self):
         # Initialize Google Gemini
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            print("Warning: GOOGLE_API_KEY not set")
+        self.model = None
+        try:
+            api_key = os.environ.get("GOOGLE_API_KEY")
+            if not api_key:
+                print("Warning: GOOGLE_API_KEY not set")
+            else:
+                genai.configure(api_key=api_key)
+                # Use 1.5-flash (Stable) to avoid startup errors
+                self.model = genai.GenerativeModel('gemini-1.5-flash')
+        except Exception as e:
+            print(f"FAILED TO INIT AI ENGINE: {e}")
             self.model = None
-        else:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash')
         
         # Removed Chroma/LangChain components
 
