@@ -30,6 +30,20 @@ try:
     try:
         from config import Config
         app.config.from_object(Config)
+        
+        # DEBUG: Force set URI if missing
+        if not app.config.get('SQLALCHEMY_DATABASE_URI'):
+             uri = os.environ.get('DATABASE_URL')
+             if uri and uri.startswith("postgres://"):
+                 uri = uri.replace("postgres://", "postgresql://", 1)
+             app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///vjcbot.db'
+             STARTUP_ERRORS.append("Warning: Config object failed, used manual fallback.")
+             
+        # Log the URI (masked)
+        mask_uri = app.config['SQLALCHEMY_DATABASE_URI']
+        if '@' in mask_uri: mask_uri = mask_uri.split('@')[1]
+        STARTUP_ERRORS.append(f"DB Configured: {mask_uri}")
+        
     except Exception as e:
         STARTUP_ERRORS.append(f"Config Error: {e}")
 
