@@ -164,6 +164,11 @@ def chat_api():
 @app.route('/setup')
 def setup_db():
     try:
+        # Debugging: Print config to see if DB URL is picked up
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
+        if not db_uri or 'sqlite' in db_uri:
+             return f"Warning: Using SQLite or Missing DB URL. URI: {db_uri}"
+
         with app.app_context():
             db.create_all()
             # Create default admin if not exists
@@ -175,7 +180,8 @@ def setup_db():
                 return "Database initialized! Admin user created (admin/admin123). <a href='/'>Go Home</a>"
             return "Database already exists. <a href='/'>Go Home</a>"
     except Exception as e:
-        return f"Error setting up database: {e}"
+        import traceback
+        return f"CRITICAL ERROR: {e} <br><pre>{traceback.format_exc()}</pre>"
 
 # Register Blueprints
 from auth import auth_bp
