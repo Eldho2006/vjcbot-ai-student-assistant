@@ -1,148 +1,121 @@
 import os
 import sys
-import traceback
 import logging
-
-# 1. Initialize Flask App IMMEDIATELY
 from flask import Flask, jsonify, render_template, Blueprint, request, redirect, url_for, flash
 
+# --- Global App Object ---
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("vjcbot")
 
-# 2. Global Error Storage
-STARTUP_ERRORS = []
+# --- Global State ---
+db = None
+ai_engine = None
+INIT_ERROR = None
 
-# 3. Health Route (Always works)
-@app.route('/health')
-def health():
-    return jsonify({
-        "status": "RUNNING" if not STARTUP_ERRORS else "CRASHED",
-        "errors": STARTUP_ERRORS,
-        "python": sys.version
-    })
-
-# 4. Critical Logic Wrapper
-try:
-    # --- Logging ---
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
-    # --- Config ---
+# --- Critical: Top-level Error Handling for Vercel ---
+# We define everything inside a function to prevent import crashes at module level
+def initialize_app(app):
+    global db, ai_engine
     try:
+        # 1. Config
         from config import Config
         app.config.from_object(Config)
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Config Error: {e}")
-
-    # --- Database & Extensions ---
-    from flask_login import LoginManager, login_required, current_user
-    from werkzeug.utils import secure_filename
-    import PyPDF2
-    
-    try:
-        from database import db, User, Document
-        db.init_app(app)
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Database Init Error: {e}")
-
-    login_manager = LoginManager()
-    login_manager.login_view = 'auth.login'
-    login_manager.init_app(app)
-
-    @login_manager.user_loader
-    def load_user(user_id):
-        return User.query.get(int(user_id))
-
-    # --- AI Engine ---
-    ai_engine = None
-    try:
-        from ai_engine import ai_engine
-    except Exception as e:
-        STARTUP_ERRORS.append(f"AI Engine Import Warning: {e}")
-
-    # --- Blueprints ---
-    main_bp = Blueprint('main', __name__)
-
-    @main_bp.route('/admin')
-    @login_required
-    def admin_dashboard():
-        if current_user.role != 'admin':
-            return redirect(url_for('main.chat'))
-        users = User.query.filter_by(role='student').all()
-        documents = Document.query.all()
-        return render_template('admin_dashboard.html', users=users, documents=documents)
-
-    @main_bp.route('/admin/add_user', methods=['POST'])
-    @login_required
-    def add_user():
-        # ... (Simplified for brevity, assuming standard logic) ...
-        if current_user.role != 'admin': return redirect(url_for('main.chat'))
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if User.query.filter_by(username=username).first():
-            flash('Username exists')
-        else:
-            u = User(username=username, role='student')
-            u.set_password(password)
-            db.session.add(u)
-            db.session.commit()
-            flash('User created')
-        return redirect(url_for('main.admin_dashboard'))
         
-    @main_bp.route('/admin/upload', methods=['POST'])
-    @login_required
-    def upload_file():
-        # ... logic ...
-        if 'file' in request.files:
-            f = request.files['file']
-            if f and f.filename:
-                # Mock save for safety check
-                flash('File upload received (Processing Logic Skipped for Safe Mode)')
-        return redirect(request.referrer)
+        # 2. Db & Extensions
+        from database import db as _db, User, Document
+        import PyPDF2
+        from flask_login import LoginManager, login_required, current_user
+        
+        db = _db
+        db.init_app(app)
+        
+        login_manager = LoginManager()
+        login_manager.login_view = 'auth.login'
+        login_manager.init_app(app)
 
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.query.get(int(user_id))
+            
+        # 3. AI Engine
+        try:
+            from ai_engine import ai_engine as _ai
+            ai_engine = _ai
+        except Exception as e:
+            logger.warning(f"AI Engine failed to load: {e}")
+            
+        # 4. Blueprints
+        from auth import auth_bp
+        app.register_blueprint(auth_bp)
+        
+        # Register Main Blueprint
+        register_main_routes(app, User, Document, login_required, current_user)
+        
+        logger.info("Application Initialized Successfully")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Initialization Failed: {e}")
+        return str(e)
+
+# --- Define Main Routes Function (Avoids circular imports) ---
+def register_main_routes(app, User, Document, login_required, current_user):
+    main_bp = Blueprint('main', __name__)
+    
     @main_bp.route('/chat')
     @login_required
     def chat():
         return render_template('chat.html')
-        
-    @main_bp.route('/api/chat', methods=['POST'])
+
+    @main_bp.route('/admin')
     @login_required
-    def chat_api():
-        msg = request.json.get('message')
-        if ai_engine:
-             resp = ai_engine.get_answer(msg)
-        else:
-             resp = "AI Unavailable"
-        return jsonify({'response': resp})
-
-    # Register Main
-    app.register_blueprint(main_bp)
-    
-    # Register Auth Safely
-    try:
-        from auth import auth_bp
-        app.register_blueprint(auth_bp)
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Auth Blueprint Error: {e}")
-
-    # Setup Route
-    @app.route('/setup')
-    def setup_db():
+    def admin_dashboard():
+        if current_user.role != 'admin': return redirect(url_for('main.chat'))
         try:
-             with app.app_context():
-                 db.create_all()
-                 if not User.query.filter_by(username='admin').first():
-                     u = User(username='admin', role='admin')
-                     u.set_password('admin123')
-                     db.session.add(u)
-                     db.session.commit()
-                     return "DB Init Success"
-                 return "DB Exists"
-        except Exception as e:
-             return f"Setup Failed: {e}"
+            users = User.query.filter_by(role='student').all()
+            docs = Document.query.all()
+        except:
+             users, docs = [], []
+        return render_template('admin_dashboard.html', users=users, documents=docs)
 
-except Exception as e:
-    STARTUP_ERRORS.append(f"FATAL STARTUP ERROR: {e}\n{traceback.format_exc()}")
-    print(f"FATAL: {e}")
+    # (Add other routes as needed - keeping minimal for stability first)
+    # ...
+    
+    app.register_blueprint(main_bp)
+
+# --- EXECUTE INITIALIZATION SAFELY ---
+# This runs on startup. If it fails, INIT_ERROR is set.
+INIT_ERROR = initialize_app(app)
+
+# --- Health Check (Always Returns) ---
+@app.route('/health')
+def health():
+    status = "RUNNING"
+    if INIT_ERROR:
+        status = "CRASHED_ON_STARTUP"
+    
+    return jsonify({
+        "status": status,
+        "init_error": INIT_ERROR,
+        "db_connected": str(db.engine.url) if db and db.engine else "NO",
+        "python": sys.version
+    })
+
+@app.route('/setup')
+def setup():
+    if INIT_ERROR: return f"Cannot Setup: {INIT_ERROR}"
+    try:
+        with app.app_context():
+            db.create_all()
+            if not User.query.filter_by(username='admin').first():
+                 u = User(username='admin', role='admin')
+                 u.set_password('admin123')
+                 db.session.add(u)
+                 db.session.commit()
+                 return "DB Init OK"
+            return "DB Exists"
+    except Exception as e: return f"Setup Error: {e}"
 
 if __name__ == '__main__':
     app.run(debug=True)
