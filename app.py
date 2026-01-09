@@ -147,6 +147,19 @@ try:
             
         return redirect(request.referrer)
 
+    @main_bp.route('/admin/delete_file/<int:file_id>', methods=['POST'])
+    @login_required
+    def delete_file(file_id):
+        if current_user.role != 'admin': return redirect(url_for('main.chat'))
+        try:
+            doc = Document.query.get_or_404(file_id)
+            db.session.delete(doc)
+            db.session.commit()
+            flash('File deleted')
+        except Exception as e:
+            flash(f"Delete Error: {e}")
+        return redirect(url_for('main.admin_dashboard'))
+
     @main_bp.route('/chat')
     @login_required
     def chat():
