@@ -1,11 +1,10 @@
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Werkzeug
-python-dotenv
-PyPDF2
-google-generativeai
-psycopg2-binary
-gunicorn
-# Optional Search
-google-search-results
+Flask==2.3.3
+Werkzeug==2.3.7
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+python-dotenv==1.0.0
+PyPDF2==3.0.1
+google-generativeai==0.3.1
+psycopg2-binary==2.9.9
+gunicorn==21.2.0
+google-search-results==2.4.2
