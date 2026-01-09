@@ -14,15 +14,20 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        user = User.query.filter_by(username=username).first()
+        try:
+            user = User.query.filter_by(username=username).first()
 
-        if user and user.check_password(password):
-            login_user(user)
-            if user.role == 'admin':
-                return redirect(url_for('main.admin_dashboard'))
-            return redirect(url_for('main.chat'))
-        else:
-            flash('Invalid username or password')
+            if user and user.check_password(password):
+                login_user(user)
+                if user.role == 'admin':
+                    return redirect(url_for('main.admin_dashboard'))
+                return redirect(url_for('main.chat'))
+            else:
+                flash('Invalid username or password')
+        except Exception as e:
+            import traceback
+            flash(f"Login Error: {e}")
+            print(f"Login Trace: {traceback.format_exc()}")
 
     return render_template('login.html')
 
