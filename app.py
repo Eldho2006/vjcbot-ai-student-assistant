@@ -161,6 +161,22 @@ def chat_api():
     response = ai_engine.get_answer(user_message)
     return jsonify({'response': response})
 
+@app.route('/setup')
+def setup_db():
+    try:
+        with app.app_context():
+            db.create_all()
+            # Create default admin if not exists
+            if not User.query.filter_by(username='admin').first():
+                admin = User(username='admin', role='admin')
+                admin.set_password('admin123')
+                db.session.add(admin)
+                db.session.commit()
+                return "Database initialized! Admin user created (admin/admin123). <a href='/'>Go Home</a>"
+            return "Database already exists. <a href='/'>Go Home</a>"
+    except Exception as e:
+        return f"Error setting up database: {e}"
+
 # Register Blueprints
 from auth import auth_bp
 app.register_blueprint(auth_bp)
