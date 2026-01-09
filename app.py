@@ -2,63 +2,39 @@ import os
 import sys
 import logging
 import traceback
-
-# 1. Initialize Flask App IMMEDIATELY
 from flask import Flask, jsonify, render_template, Blueprint, request, redirect, url_for, flash
 
+# --- Global App Object ---
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("vjcbot")
 
-# 2. Global Error Storage
-STARTUP_ERRORS = []
+# --- Global State ---
+INIT_ERROR = None
+db = None
+ai_engine = None
 
-# 3. Health Route (Always works)
-@app.route('/health')
-def health():
-    return jsonify({
-        "status": "RUNNING" if not STARTUP_ERRORS else "PARTIAL_FAIL",
-        "errors": STARTUP_ERRORS,
-        "python": sys.version
-    })
-
-# 4. Critical Logic Wrapper
-try:
-    # --- Logging ---
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
-    # --- Config ---
+# --- Initialization Logic ---
+def initialize_app(app):
+    global db, ai_engine
     try:
+        # 1. Config
         from config import Config
         app.config.from_object(Config)
         
-        # DEBUG: Force set URI if missing
+        # DEBUG: Force set URI if specifically missing (Safety Net)
         if not app.config.get('SQLALCHEMY_DATABASE_URI'):
              uri = os.environ.get('DATABASE_URL')
              if uri and uri.startswith("postgres://"):
                  uri = uri.replace("postgres://", "postgresql://", 1)
              app.config['SQLALCHEMY_DATABASE_URI'] = uri or 'sqlite:///vjcbot.db'
-             STARTUP_ERRORS.append("Warning: Config object failed, used manual fallback.")
-             
-        # Log the URI (masked)
-        mask_uri = app.config['SQLALCHEMY_DATABASE_URI']
-        if '@' in mask_uri: mask_uri = mask_uri.split('@')[1]
-        STARTUP_ERRORS.append(f"DB Configured: {mask_uri}")
         
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Config Error: {e}")
-
-    # --- Database Init ---
-    try:
-        from database import db, User, Document
+        # 2. Database
+        from database import db as _db, User, Document
+        db = _db
         db.init_app(app)
-        # Verify connection immediately to catch Auth errors early
-        # Note: We do NOT use 'with app.app_context()' here to avoid 'teardown_appcontext' issues if module level is weird
-        # But we do need to known if DB is reachable? No, lazy connect is better.
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Database Init Error: {e}")
-
-    # --- Extensions ---
-    try: 
+        
+        # 3. Extensions
         from flask_login import LoginManager, login_required, current_user
         login_manager = LoginManager()
         login_manager.login_view = 'auth.login'
@@ -66,39 +42,54 @@ try:
 
         @login_manager.user_loader
         def load_user(user_id):
-            if not helper_db_ready(): return None
+            if INIT_ERROR: return None # Safety
             return User.query.get(int(user_id))
             
+        # 4. AI Engine (Soft Fail)
+        try:
+            from ai_engine import ai_engine as _ai
+            ai_engine = _ai
+        except Exception as e:
+            logger.warning(f"AI Engine skipped: {e}")
+
+        # 5. Blueprints
+        from auth import auth_bp
+        app.register_blueprint(auth_bp)
+        
+        # Main Routes (Inline to avoid circular deps if any)
+        register_main_routes(app, User, Document, login_required, current_user)
+        
+        logger.info("App Initialized Successfully")
+        return None
+        
     except Exception as e:
-        STARTUP_ERRORS.append(f"Extensions/Login Error: {e}")
+        logger.error(f"Init Failed: {e}")
+        return f"{e}\n{traceback.format_exc()}"
 
-    # --- AI Engine ---
-    ai_engine = None
-    try:
-        from ai_engine import ai_engine
-    except Exception as e:
-         # Log but don't crash
-         logger.warning(f"AI Engine not loaded: {e}")
-
-    # --- Helper: Check if DB is ready before queries ---
-    def helper_db_ready():
-        return "Database Init Error" not in str(STARTUP_ERRORS)
-
-    # --- Blueprints ---
+def register_main_routes(app, User, Document, login_required, current_user):
     main_bp = Blueprint('main', __name__)
+    
+    # Helper to check DB health in routes
+    def db_safe():
+        return not INIT_ERROR
+
+    @main_bp.route('/chat')
+    @login_required
+    def chat():
+        return render_template('chat.html')
 
     @main_bp.route('/admin')
     @login_required
     def admin_dashboard():
-        if not helper_db_ready(): return "Database Error", 500
+        if not db_safe(): return "System Error", 500
         if current_user.role != 'admin':
             return redirect(url_for('main.chat'))
         try:
             users = User.query.filter_by(role='student').all()
-            documents = Document.query.all()
-            return render_template('admin_dashboard.html', users=users, documents=documents)
+            docs = Document.query.all()
+            return render_template('admin_dashboard.html', users=users, documents=docs)
         except Exception as e:
-            return f"<h3>Dashboard Error</h3><p>{e}</p><pre>{traceback.format_exc()}</pre>"
+            return f"Dashboard Error: {e}"
 
     @main_bp.route('/admin/add_user', methods=['POST'])
     @login_required
@@ -116,9 +107,9 @@ try:
                 db.session.commit()
                 flash('User created')
         except Exception as e:
-            flash(f"Add User Error: {e}")
+            flash(f"Error: {e}")
         return redirect(url_for('main.admin_dashboard'))
-        
+
     @main_bp.route('/admin/upload', methods=['POST'])
     @login_required
     def upload_file():
@@ -128,37 +119,22 @@ try:
             if 'file' in request.files:
                 f = request.files['file']
                 if f and f.filename:
+                    # Logic
                     filename = secure_filename(f.filename)
                     text = ""
                     if filename.lower().endswith('.pdf'):
-                        try:
-                            reader = PyPDF2.PdfReader(f.stream)
-                            for page in reader.pages:
-                                text += page.extract_text() or ""
-                        except Exception as pdf_err:
-                            flash(f"PDF Parse Error: {pdf_err}")
-                            return redirect(request.referrer)
-                    else:
-                        text = "Non-PDF content"
+                         reader = PyPDF2.PdfReader(f.stream)
+                         for page in reader.pages: text += page.extract_text() or ""
+                    else: text = "Non-PDF"
                     
-                    # Saving
-                    doc = Document(filename=filename, file_path="CLOUD", uploaded_by=current_user.id, content=text[:100000], processed=True) # Limit content debug
+                    doc = Document(filename=filename, file_path="CLOUD", uploaded_by=current_user.id, content=text[:100000], processed=True)
                     db.session.add(doc)
                     db.session.commit()
                     
-                    # AI
-                    try:
-                        if ai_engine: ai_engine.add_document(text, {})
-                    except Exception as ai_err:
-                        flash(f"AI Index Warning: {ai_err}")
-
-                    flash('Uploaded Successfully')
-            else:
-                 flash("No file part")
+                    if ai_engine: ai_engine.add_document(text, {})
+                    flash('Uploaded')
         except Exception as e:
             flash(f"Upload Error: {e}")
-            print(f"Upload Trace: {traceback.format_exc()}")
-            
         return redirect(request.referrer)
 
     @main_bp.route('/admin/delete_file/<int:file_id>', methods=['POST'])
@@ -174,11 +150,6 @@ try:
             flash(f"Delete Error: {e}")
         return redirect(url_for('main.admin_dashboard'))
 
-    @main_bp.route('/chat')
-    @login_required
-    def chat():
-        return render_template('chat.html')
-        
     @main_bp.route('/api/chat', methods=['POST'])
     @login_required
     def chat_api():
@@ -189,36 +160,41 @@ try:
              resp = "AI Unavailable"
         return jsonify({'response': resp})
 
-    # Register Main
     app.register_blueprint(main_bp)
-    
-    # Register Auth Safely
+
+
+# --- EXECUTE INIT (Auto-Start) ---
+INIT_ERROR = initialize_app(app)
+
+# --- Routes ---
+@app.route('/')
+def index():
+    if INIT_ERROR:
+        return f"<h1>Startup Error (Safe Mode)</h1><pre>{INIT_ERROR}</pre>"
+    return redirect(url_for('auth.login'))
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "RUNNING",
+        "init_error": INIT_ERROR,
+        "python": sys.version
+    })
+
+@app.route('/setup')
+def setup():
+    if INIT_ERROR: return f"Cannot Setup: {INIT_ERROR}"
     try:
-        from auth import auth_bp
-        app.register_blueprint(auth_bp)
-    except Exception as e:
-        STARTUP_ERRORS.append(f"Auth Blueprint Error (Likely DB related): {e}")
-
-    # Setup Route
-    @app.route('/setup')
-    def setup_db():
-        if not helper_db_ready(): return jsonify(STARTUP_ERRORS)
-        try:
-             with app.app_context():
-                 db.create_all()
-                 if not User.query.filter_by(username='admin').first():
-                     u = User(username='admin', role='admin')
-                     u.set_password('admin123')
-                     db.session.add(u)
-                     db.session.commit()
-                     return "DB Init Success"
-                 return "DB Exists"
-        except Exception as e:
-             return f"Setup Failed: {e}"
-
-except Exception as e:
-    STARTUP_ERRORS.append(f"FATAL STARTUP ERROR: {e}\n{traceback.format_exc()}")
-    print(f"FATAL: {e}")
+        with app.app_context():
+            db.create_all()
+            if not User.query.filter_by(username='admin').first():
+                 u = User(username='admin', role='admin')
+                 u.set_password('admin123')
+                 db.session.add(u)
+                 db.session.commit()
+                 return "DB Init OK"
+            return "DB Exists"
+    except Exception as e: return f"Setup Error: {e}"
 
 if __name__ == '__main__':
     app.run(debug=True)
