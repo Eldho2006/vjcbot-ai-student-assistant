@@ -133,6 +133,17 @@ def delete_file(file_id):
     db.session.delete(doc)
     db.session.commit()
     
+    # Re-index to update knowledge_base.txt
+    try:
+        from reindex import reindex_knowledge_base
+        # Pass the upload folder explicitly to avoid circular imports in reindex.py
+        reindex_knowledge_base(current_app.config['UPLOAD_FOLDER'])
+        flash(f'File {doc.filename} deleted and knowledge base updated.')
+    except ImportError:
+         flash(f'File {doc.filename} deleted. (Warning: Run reindex.py manually)')
+    except Exception as e:
+         flash(f'File deleted but reindex failed: {e}')
+
     return redirect(url_for('main.admin_dashboard'))
 
 @main_bp.route('/chat')

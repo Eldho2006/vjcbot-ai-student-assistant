@@ -1,11 +1,19 @@
 import os
 import PyPDF2
-from app import app
 from database import db, Document
 from ai_engine import ai_engine
 
-def reindex_all():
-    upload_folder = app.config['UPLOAD_FOLDER']
+def reindex_knowledge_base(upload_folder):
+    """
+    Clears and rebuilds the knowledge_base.txt from the uploads directory.
+    """
+    if os.path.exists("knowledge_base.txt"):
+        try:
+            os.remove("knowledge_base.txt")
+            print("Cleared existing knowledge base.")
+        except Exception as e:
+            print(f"Error clearing knowledge base: {e}")
+
     if not os.path.exists(upload_folder):
         print("No uploads folder found.")
         return
@@ -21,10 +29,21 @@ def reindex_all():
                 print(f"Processing PDF: {filename}")
                 with open(filepath, 'rb') as f:
                     reader = PyPDF2.PdfReader(f)
-                    for page in reader.pages:
+                    skipped_pages = 0
+                    for ids, page in enumerate(reader.pages):
                         extracted = page.extract_text()
                         if extracted:
+                            # --- SMART FILTER: Skip Syllabus Pages ---
+                            # If the page header (first 500 chars) explicitly mentions "SYLLABUS" or "COURSE OBJECTIVES"
+                            header_text = extracted[:500].upper()
+                            if "SYLLABUS" in header_text or "COURSE OBJECTIVES" in header_text or "COURSE OUTLINE" in header_text:
+                                skipped_pages += 1
+                                continue # Skip this page
+                            
                             text += extracted
+                    
+                    if skipped_pages > 0:
+                        print(f"  [Filter] Skipped {skipped_pages} syllabus/intro pages from {filename}")
             elif filename.endswith('.txt'):
                 print(f"Processing Text: {filename}")
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -35,6 +54,7 @@ def reindex_all():
                 
             if text:
                 print(f"Adding {len(text)} characters to knowledge base...")
+                # We use metadata to ensure the 'filename' is recorded for Source Filtering
                 ai_engine.add_document(text, {"source": filename, "uploaded_by": "system_recovery"})
                 print("Done.")
             else:
@@ -44,5 +64,6 @@ def reindex_all():
             print(f"Error processing {filename}: {e}")
 
 if __name__ == "__main__":
+    from app import app
     with app.app_context():
-        reindex_all()
+        reindex_knowledge_base(app.config['UPLOAD_FOLDER'])

@@ -23,10 +23,8 @@ class AIEngine:
             self.model = None
         else:
             genai.configure(api_key=api_key)
-            # Switch to 'gemini-2.0-flash-lite-preview' (Lite model)
-            # 'gemini-2.0-flash' and '2.5-flash' hit strict 20 req/day limits.
-            # Lite models typically offer higher thoroughput/quotas.
-            self.model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
+            # Switch to 'gemini-2.0-flash' which is confirmed available.
+            self.model = genai.GenerativeModel('gemini-2.0-flash')
         
         self.persist_directory = "db"
         
@@ -84,21 +82,76 @@ class AIEngine:
                 with open("knowledge_base.txt", "r", encoding="utf-8") as f:
                     full_text = f.read()
 
-            # Filter context to avoid Rate Limit (TPM) issues with large files
-            context = self._retrieve_relevant_chunks(query, full_text)
+            # --- HARD FILTER LOGIC ---
+            # Parsing line-by-line to safely identify and exclude syllabus sections
+            is_syllabus_query = any(k in query.lower() for k in ["syllabus", "curriculum", "module", "unit", "outline"])
             
+            if not is_syllabus_query:
+                lines = full_text.splitlines()
+                filtered_lines = []
+                current_source_is_banned = False
+                
+                for line in lines:
+                    stripped = line.strip()
+                    # Check for Source Header
+                    # Format is usually: --- Source: Filename.pdf ---
+                    if stripped.startswith("--- Source:") and stripped.endswith("---"):
+                        source_name = stripped.lower()
+                        # specific keywords to ban
+                        if "syllabus" in source_name:
+                            print(f"DEBUG: Filtering out source: {stripped}")
+                            current_source_is_banned = True
+                        else:
+                            current_source_is_banned = False
+                            filtered_lines.append(line)
+                    else:
+                        # Normal Content Line
+                        if not current_source_is_banned:
+                            filtered_lines.append(line)
+                
+                full_text = "\n".join(filtered_lines)
+            # -------------------------
+
+            # -------------------------
+
+            # IMPROVED RETRIEVAL: CONTEXT STUFFING
+            # Gemini 2.0 Flash has a massive context window (1M tokens).
+            # We should prioritize sending the FULL filtered text instead of naive keyword chunks.
+            # 1 token ~= 4 chars. 1M tokens ~= 4M chars. 
+            # We set a safe limit of 500,000 chars to be conservative and fast.
+            
+            if len(full_text) < 500000:
+                print(f"DEBUG: Using Full Context (Length: {len(full_text)} chars)")
+                context = full_text
+            else:
+                print(f"DEBUG: Text too large ({len(full_text)} chars), falling back to chunking.")
+                # Filter context to avoid Rate Limit (TPM) issues with large files
+                # Increased chunk_size to 2000 because PDF text is highly vertical/spaced
+                context = self._retrieve_relevant_chunks(query, full_text, chunk_size=2000, overlap=200, top_k=3)
+            
+            # Clean context to remove annoying pdf newlines and excessive whitespace
+            if context:
+                # Replace newlines and multiple spaces with a single space
+                import re
+                context = re.sub(r'\s+', ' ', context).strip()
+
             # 2. Construct Prompt with Context
             prompt = f"""
-You are a helpful and friendly AI assistant.
-Your goal is to explain things in the MOST SIMPLE and EASY-TO-UNDERSTAND way possible.
-Use the provided context from the user's uploaded documents.
-If possible, use analogies or simple examples.
-If the answer is NOT in the context, say exactly "SEARCH_REQUIRED".
+You are an expert at decoding messy/broken text from PDFs.
+The following context contains valid information but has "newlines" between words or broken sentences.
+
+YOUR TASK:
+1. Ignore the bad formatting. Treat the text as a continuous stream.
+2. Find the answer to the User's Question in the text.
+3. Summarize the answer clearly.
 
 Context:
 {context}
 
-Question: {query}
+Question:
+{query}
+
+Answer:
 """
             try:
                 # First attempt: Answer from Context
@@ -106,91 +159,98 @@ Question: {query}
                      raise Exception("Google Generative AI Model not initialized.")
                      
                 try:
+                    # Attempt 1: Try with currently selected context (Full or Chunked)
                     response = self.model.generate_content(prompt)
                     answer = response.text.strip()
                 except Exception as api_err:
-                     if "429" in str(api_err) or "quota" in str(api_err).lower():
-                          # Fallback for API Quota Exceeded on Context
-                          # If we found relevant context but can't summarize, return the snippets.
-                          if context and len(context) > 50:
-                               return f"I found the answer in your documents, but my AI quota is exhausted so I cannot summarize it. Here is the relevant text:\n\n{context[:2000]}..."
-                          else:
-                               raise Exception(f"Quota exceeded and no good context found: {api_err}")
-                     else:
-                          raise api_err
+                     # FAILOVER STRATEGY: Try other models if the primary one fails (Quota/429/500)
+                     print(f"DEBUG: Primary model failed ({api_err}). Attempting failover...")
+                     
+                     fallback_models = ["gemini-1.5-flash", "gemini-1.5-pro"]
+                     success = False
+                     
+                     for model_name in fallback_models:
+                         try:
+                             print(f"DEBUG: Trying fallback model '{model_name}'...")
+                             fallback_model = genai.GenerativeModel(model_name)
+                             response = fallback_model.generate_content(prompt)
+                             answer = response.text.strip()
+                             success = True
+                             print(f"DEBUG: Fallback to {model_name} SUCCESS.")
+                             break
+                         except Exception as fallback_err:
+                             print(f"DEBUG: Fallback to {model_name} failed: {fallback_err}")
+                             continue
+                     
+                     if not success:
+                         # If all models fail, check specifically for Quota/Size issues to try Chunking
+                         if ("429" in str(api_err) or "quota" in str(api_err).lower()) and len(context) > 0:
+                              # RETRY STRATEGY:
+                              # If we failed with massive context, try falling back to small chunks.
+                              print("DEBUG: Full context failed (Quota). Retrying with Chunks...")
+                              small_context = self._retrieve_relevant_chunks(query, full_text, top_k=3, chunk_size=2000, overlap=200) # Reduced chunks
+                              
+                              retry_prompt = f"""
+You are an AI assistant.
+Answer the question using the provided snippets.
 
+Context:
+{small_context}
+
+Question:
+{query}
+"""
+                              try:
+                                  # Try fallback models for retry prompt too
+                                  retry_success = False
+                                  for model_name in ["gemini-2.0-flash"] + fallback_models:
+                                      try:
+                                          fallback_model = genai.GenerativeModel(model_name)
+                                          response = fallback_model.generate_content(retry_prompt)
+                                          return response.text.strip()
+                                      except:
+                                          continue
+                                          
+                                  if not retry_success:
+                                      raise api_err # Propagate original error if everything fails
+
+                              except Exception as retry_err:
+                                   # If chunks fail, RAISE error so outer block handles it with "Force Show Data".
+                                   raise retry_err
+                         else:
+                              # For other API errors, fail gracefully
+                              raise api_err
+ 
                 if "SEARCH_REQUIRED" in answer or "I cannot answer" in answer:
-                    raise Exception("Context insufficient")
+                    with open("rejection_log.txt", "a") as f:
+                        f.write(f"Query: {query}\nREJECTED ANSWER: {answer}\n----------------\n")
+                    raise Exception("Context insufficient (AI Refusal)")
                 
                 return answer
 
             except Exception as e:
-                # Fallback: Web Search
-                print(f"Searching web (Reason: {e})...")
-                serper_key = os.environ.get("SERPER_API_KEY")
-                if not serper_key:
-                    return f"I couldn't find an answer in my database and Web Search is unavailable (missing API key). Reason: {e}"
+                # Fallback: Web Search -> DISABLED PER USER REQUEST
+                print(f"Ai Engine Error: {e}")
                 
-                try:
-                    # Manual Serper Call (since langchain wrapper is missing)
-                    import requests
-                    import json
-                    
-                    url = "https://google.serper.dev/search"
-                    payload = json.dumps({"q": query})
-                    headers = {
-                        'X-API-KEY': serper_key,
-                        'Content-Type': 'application/json'
-                    }
-                    
-                    resp = requests.post(url, headers=headers, data=payload)
-                    if resp.status_code != 200:
-                         raise Exception(f"Serper API Error: {resp.status_code} - {resp.text}")
-                         
-                    search_data = resp.json()
-                    
-                    # Extract snippets
-                    snippets = ""
-                    if 'organic' in search_data:
-                        for result in search_data['organic'][:5]:
-                            snippets += f"- {result.get('title')}: {result.get('snippet')}\n"
-                    
-                    # Second Attempt: Answer from Search
-                    search_prompt = f"""
-You are a helpful AI assistant.
-Answer the question using the following web search results.
-Explain the answer in the MOST SIMPLE and EASY-TO-UNDERSTAND way possible.
-Fill in any missing details to provide a complete answer.
+                # LOG ERROR for debugging
+                with open("rejection_log.txt", "a") as f:
+                     f.write(f"SYSTEM ERROR: {e}\nQuery: {query}\n----------------\n")
 
-Search Results:
-{snippets}
-
-Question: {query}
-"""
-                    if not self.model:
-                        return f"[Web Search Result] {snippets}"
-
-                    try:
-                        search_response = self.model.generate_content(search_prompt)
-                        return f"[Web Search] {search_response.text}"
-                    except Exception as api_err:
-                         if "429" in str(api_err) or "quota" in str(api_err).lower():
-                              return f"[Web Search Result] (AI Summary Unavailable Due to Quota)\n{snippets}"
-                         raise api_err
-                         
-                except Exception as se:
-                     return f"I couldn't find an answer in my database and searching the web failed: {se}"
-
-                except Exception as se:
-                     return f"I couldn't find an answer in my database and searching the web failed: {se}"
+                # LAST RESORT: FORCE RETURN CONTEXT
+                if context:
+                    clean_excerpt = str(context)[:3500] if context else ""
+                    if len(clean_excerpt) > 50:
+                         return f"I found the relevant information in your notes, but I cannot summarize it right now (Error: {e}). Here is the exact text:\n\n\"{clean_excerpt}...\""
+                
+                return "I couldn't find the answer in your documents."
 
         # If RAG IS Available (legacy/optional path)
         return "RAG functionality is currently disabled in this environment."
 
-    def _retrieve_relevant_chunks(self, query, text, chunk_size=3000, overlap=500, top_k=5):
+    def _retrieve_relevant_chunks(self, query, text, chunk_size=2000, overlap=200, top_k=3):
         """
         Simple keyword-based retrieval to select relevant chunks from text.
-        This avoids sending the entire file which hits Token limits.
+        Updated: Avoids cutting words in half by snapping to nearest space.
         """
         if not text:
             return ""
@@ -213,13 +273,31 @@ Question: {query}
             # If query is only stop words (unlikely), fall back to original or return nothing
             return ""
 
-        # Create chunks
+        # Create chunks (Smart Slicing)
         chunks = []
-        for i in range(0, len(text), chunk_size - overlap):
-            chunk = text[i:i + chunk_size]
+        start = 0
+        text_len = len(text)
+        
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            
+            # Adjust end to nearest space to avoid cutting words
+            if end < text_len:
+                # Look for last space within the last 50 chars of the chunk
+                last_space = text.rfind(' ', start, end)
+                if last_space != -1:
+                    end = last_space
+            
+            chunk = text[start:end]
             chunks.append(chunk)
-
-        # Score chunks based on significant words only
+            
+            # Move start pointer, respecting overlap
+            start = end - overlap
+            if start < 0: start = 0 # Safety
+            
+            # Prevent infinite loop if chunk size is effectively 0
+            if end == start:
+                 start += 1
         scored_chunks = []
         for chunk in chunks:
             chunk_lower = chunk.lower()

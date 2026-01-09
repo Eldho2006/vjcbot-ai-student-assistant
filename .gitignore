@@ -25,6 +25,8 @@ wheels/
 .venv/
 venv/
 ENV/
+.venv312/
+.venv_old/
 
 # Environment Variables
 .env

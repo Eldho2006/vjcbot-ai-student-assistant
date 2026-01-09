@@ -3,23 +3,27 @@
 {% block title %}Login - VJCBOT{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-4">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white text-center">
-                <h4>Login</h4>
+<div class="auth-wrapper fade-in-up">
+    <div class="col-md-5 col-lg-4">
+        <div class="auth-card" data-tilt data-tilt-max="10" data-tilt-speed="400" data-tilt-glare
+            data-tilt-max-glare="0.2">
+            <div class="auth-header">
+                <h3>Welcome Back</h3>
+                <p class="mb-0 opacity-75">Sign in to VJCBOT</p>
             </div>
-            <div class="card-body">
+            <div class="auth-body">
                 <form method="POST">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" required>
+                    <div class="mb-4">
+                        <label for="username" class="form-label text-muted small fw-bold">USERNAME</label>
+                        <input type="text" class="form-control" id="username" name="username"
+                            placeholder="Enter your ID" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" required>
+                    <div class="mb-4">
+                        <label for="password" class="form-label text-muted small fw-bold">PASSWORD</label>
+                        <input type="password" class="form-control" id="password" name="password" placeholder="••••••••"
+                            required>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Login</button>
+                    <button type="submit" class="btn btn-gradient w-100">Sign In</button>
                 </form>
             </div>
         </div>
