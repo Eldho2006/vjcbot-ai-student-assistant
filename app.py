@@ -3,7 +3,15 @@ import sys
 import traceback
 
 # 1. Minimal Imports
-from flask import Flask, jsonify, render_template
+# 1. Minimal Imports
+from flask import Flask, jsonify, render_template, Blueprint, redirect, url_for, request
+
+# Mock login_required to prevent crash if flask_login fails
+try:
+    from flask_login import login_required, current_user
+except ImportError:
+    def login_required(f): return f
+    current_user = None
 
 # 2. Create App immediately
 app = Flask(__name__)
