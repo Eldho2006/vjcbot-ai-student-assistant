@@ -13,7 +13,16 @@ import PyPDF2
 app = Flask(__name__)
 app.config.from_object(Config)
 
-db.init_app(app)
+@app.route('/health')
+def health_check():
+    return "OK: Server is running. Python Version: " + os.sys.version
+
+# Try initializing DB, but don't crash the *entire* app if it fails (so we can see /health)
+try:
+    db.init_app(app)
+except Exception as e:
+    print(f"DB Init Failed: {e}")
+
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
 login_manager.init_app(app)
