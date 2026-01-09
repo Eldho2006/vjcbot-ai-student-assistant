@@ -7,6 +7,8 @@ from flask import Flask, jsonify, render_template
 
 # 2. Create App immediately
 app = Flask(__name__)
+# GLOBAL BLUEPRINT DEFINITION (Critical to prevent NameError on crash)
+main_bp = Blueprint('main', __name__)
 
 # 3. Global Status Log
 DIAGNOSTICS = {
@@ -78,7 +80,7 @@ try:
         raise e
 
     # --- Blueprints ---
-    main_bp = Blueprint('main', __name__)
+    # main_bp is already defined globally
     
     try:
         from auth import auth_bp
